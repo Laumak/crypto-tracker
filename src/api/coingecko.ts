@@ -1,9 +1,11 @@
+import { SPOT_POLL_MS, CHART_POLL_MS } from "../lib/pollSchedule.js";
+
 const BASE_URL = "https://api.coingecko.com/api/v3";
 
 // Matches the polling cadence in PriceChart — a reload within this window
 // reuses the cached response instead of firing a fresh request.
-const SPOT_CACHE_MS = 5 * 60_000;
-const CHART_CACHE_MS = 5 * 60_000;
+const SPOT_CACHE_MS = SPOT_POLL_MS;
+const CHART_CACHE_MS = CHART_POLL_MS;
 
 interface CacheEntry<T> {
   timestamp: number;

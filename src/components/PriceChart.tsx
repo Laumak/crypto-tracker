@@ -1,5 +1,7 @@
 import {
+  forwardRef,
   useEffect,
+  useImperativeHandle,
   useRef,
   useState,
   type CSSProperties,
@@ -17,29 +19,17 @@ import {
   CartesianGrid,
 } from "recharts";
 import {
-  RANGES,
   fetchMarketChart,
   fetchSpotPrice,
   type PricePoint,
   type SpotPrice,
 } from "../api/coingecko.js";
-
-// CoinGecko's finest granularity is ~5 minutes, so polling faster than that
-// just burns rate limit without ever seeing a new data point.
-const SPOT_POLL_MS = 5 * 60_000;
-const CHART_POLL_MS = 5 * 60_000;
-// Give their backend a moment past each 5-minute mark to actually update,
-// rather than fetching right on the boundary and risking a stale read.
-const ALIGN_BUFFER_MS = 15_000;
-
-/** Ms until the next wall-clock mark (e.g. :00, :05, :10, ...) plus a buffer. */
-function delayToNextAlignedMark(intervalMs: number, bufferMs: number): number {
-  const now = Date.now();
-  const lastMark = Math.floor(now / intervalMs) * intervalMs;
-  let target = lastMark + bufferMs;
-  if (target <= now) target += intervalMs;
-  return target - now;
-}
+import {
+  SPOT_POLL_MS,
+  CHART_POLL_MS,
+  ALIGN_BUFFER_MS,
+  delayToNextAlignedMark,
+} from "../lib/pollSchedule.js";
 
 const currencyFormatter = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -51,21 +41,6 @@ const currencyFormatter = new Intl.NumberFormat("en-US", {
 function formatPrice(value: number | null | undefined): string {
   if (value == null || Number.isNaN(value)) return "—";
   return currencyFormatter.format(value);
-}
-
-function formatLastUpdated(timestamp: number): string {
-  return new Date(timestamp).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-}
-
-function formatCountdown(totalSeconds: number): string {
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  if (minutes === 0) return `${seconds}s`;
-  return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
 function formatAxisTick(timestamp: number, rangeKey: string): string {
@@ -109,30 +84,33 @@ function formatTooltipLabel(timestamp: number): string {
 
 type Status = "loading" | "ready" | "error";
 
+export interface PriceChartHandle {
+  refresh: () => void;
+}
+
 interface PriceChartProps {
   coinId: string;
   name: string;
   symbol: string;
   accent: string;
+  range: string;
+  onSpotUpdate?: (timestamp: number) => void;
 }
 
-export default function PriceChart({ coinId, name, symbol, accent }: PriceChartProps) {
-  const [range, setRange] = useState("24H");
+function PriceChart(
+  { coinId, name, symbol, accent, range, onSpotUpdate }: PriceChartProps,
+  ref: React.Ref<PriceChartHandle>,
+) {
   const [series, setSeries] = useState<PricePoint[]>([]);
   const [spot, setSpot] = useState<SpotPrice | null>(null);
   const [status, setStatus] = useState<Status>("loading");
-  const [nextFetchAt, setNextFetchAt] = useState(
-    () => Date.now() + delayToNextAlignedMark(SPOT_POLL_MS, ALIGN_BUFFER_MS),
-  );
-  const [now, setNow] = useState(() => Date.now());
   const rangeRef = useRef(range);
   const pollSpotRef = useRef<(force?: boolean) => Promise<void>>(async () => {});
+  const onSpotUpdateRef = useRef(onSpotUpdate);
 
-  // Tick once a second purely to redraw the "next update in" countdown.
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1_000);
-    return () => clearInterval(id);
-  }, []);
+    onSpotUpdateRef.current = onSpotUpdate;
+  }, [onSpotUpdate]);
 
   useEffect(() => {
     rangeRef.current = range;
@@ -157,10 +135,13 @@ export default function PriceChart({ coinId, name, symbol, accent }: PriceChartP
   useEffect(() => {
     let intervalId: ReturnType<typeof setInterval> | undefined;
     const fire = () => loadPriceSeries(coinId, rangeRef.current, rangeRef, setSeries, setStatus);
-    const timeoutId = setTimeout(() => {
-      fire();
-      intervalId = setInterval(fire, CHART_POLL_MS);
-    }, delayToNextAlignedMark(CHART_POLL_MS, ALIGN_BUFFER_MS));
+    const timeoutId = setTimeout(
+      () => {
+        fire();
+        intervalId = setInterval(fire, CHART_POLL_MS);
+      },
+      delayToNextAlignedMark(CHART_POLL_MS, ALIGN_BUFFER_MS),
+    );
     return () => {
       clearTimeout(timeoutId);
       clearInterval(intervalId);
@@ -179,6 +160,7 @@ export default function PriceChart({ coinId, name, symbol, accent }: PriceChartP
         const result = await fetchSpotPrice(coinId, force);
         if (cancelled) return;
         setSpot(result);
+        onSpotUpdateRef.current?.(result.lastUpdated);
         setSeries((prev) => {
           if (!prev.length) return prev;
           const now = Date.now();
@@ -204,11 +186,7 @@ export default function PriceChart({ coinId, name, symbol, accent }: PriceChartP
     const alignedDelay = delayToNextAlignedMark(SPOT_POLL_MS, ALIGN_BUFFER_MS);
     const timeoutId = setTimeout(() => {
       pollSpot();
-      setNextFetchAt(Date.now() + SPOT_POLL_MS);
-      intervalId = setInterval(() => {
-        pollSpot();
-        setNextFetchAt(Date.now() + SPOT_POLL_MS);
-      }, SPOT_POLL_MS);
+      intervalId = setInterval(() => pollSpot(), SPOT_POLL_MS);
     }, alignedDelay);
 
     return () => {
@@ -218,14 +196,15 @@ export default function PriceChart({ coinId, name, symbol, accent }: PriceChartP
     };
   }, [coinId]);
 
-  function handleRefresh() {
-    pollSpotRef.current(true);
-    loadPriceSeries(coinId, rangeRef.current, rangeRef, setSeries, setStatus, true);
-  }
+  useImperativeHandle(ref, () => ({
+    refresh() {
+      pollSpotRef.current(true);
+      loadPriceSeries(coinId, rangeRef.current, rangeRef, setSeries, setStatus, true);
+    },
+  }));
 
   const change = spot?.change24h;
   const changeIsUp = typeof change === "number" && change >= 0;
-  const secondsToNextFetch = Math.max(0, Math.round((nextFetchAt - now) / 1000));
 
   return (
     <section className="panel" style={{ "--accent": accent } as CSSProperties}>
@@ -242,34 +221,6 @@ export default function PriceChart({ coinId, name, symbol, accent }: PriceChartP
               {changeIsUp ? "▲" : "▼"} {Math.abs(change).toFixed(2)}% past 24h
             </span>
           )}
-          {spot?.lastUpdated && (
-            <span className="panel__updated">Updated {formatLastUpdated(spot.lastUpdated)}</span>
-          )}
-          <span className="panel__countdown">
-            Next update in {formatCountdown(secondsToNextFetch)}
-          </span>
-          <button
-            type="button"
-            className="panel__refresh"
-            onClick={handleRefresh}
-            aria-label={`Refresh ${name} now`}
-          >
-            ↻
-          </button>
-        </div>
-
-        <div className="panel__ranges" role="tablist" aria-label={`${name} time range`}>
-          {RANGES.map((r) => (
-            <button
-              key={r.key}
-              role="tab"
-              aria-selected={range === r.key}
-              className={`range-btn ${range === r.key ? "is-active" : ""}`}
-              onClick={() => setRange(r.key)}
-            >
-              {r.label}
-            </button>
-          ))}
         </div>
       </header>
 
@@ -279,8 +230,10 @@ export default function PriceChart({ coinId, name, symbol, accent }: PriceChartP
             Couldn't load {name} data. Retrying in the background.
           </div>
         )}
-        {status === "loading" && series.length === 0 && (
-          <div className="panel__notice">Loading {name} price history…</div>
+        {status === "loading" && (
+          <div className="panel__spinner-overlay" role="status" aria-label={`Loading ${name} data`}>
+            <span className="panel__spinner" />
+          </div>
         )}
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={series} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
@@ -336,3 +289,5 @@ export default function PriceChart({ coinId, name, symbol, accent }: PriceChartP
     </section>
   );
 }
+
+export default forwardRef(PriceChart);
