@@ -24,8 +24,22 @@ import {
   type SpotPrice,
 } from "../api/coingecko.js";
 
-const SPOT_POLL_MS = 60_000; // live ticker refresh
-const CHART_POLL_MS = 60_000; // background re-sync of the full series
+// CoinGecko's finest granularity is ~5 minutes, so polling faster than that
+// just burns rate limit without ever seeing a new data point.
+const SPOT_POLL_MS = 5 * 60_000;
+const CHART_POLL_MS = 5 * 60_000;
+// Give their backend a moment past each 5-minute mark to actually update,
+// rather than fetching right on the boundary and risking a stale read.
+const ALIGN_BUFFER_MS = 15_000;
+
+/** Ms until the next wall-clock mark (e.g. :00, :05, :10, ...) plus a buffer. */
+function delayToNextAlignedMark(intervalMs: number, bufferMs: number): number {
+  const now = Date.now();
+  const lastMark = Math.floor(now / intervalMs) * intervalMs;
+  let target = lastMark + bufferMs;
+  if (target <= now) target += intervalMs;
+  return target - now;
+}
 
 const currencyFormatter = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -45,6 +59,13 @@ function formatLastUpdated(timestamp: number): string {
     minute: "2-digit",
     hour12: false,
   });
+}
+
+function formatCountdown(totalSeconds: number): string {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes === 0) return `${seconds}s`;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
 function formatAxisTick(timestamp: number, rangeKey: string): string {
@@ -100,7 +121,9 @@ export default function PriceChart({ coinId, name, symbol, accent }: PriceChartP
   const [series, setSeries] = useState<PricePoint[]>([]);
   const [spot, setSpot] = useState<SpotPrice | null>(null);
   const [status, setStatus] = useState<Status>("loading");
-  const [nextFetchAt, setNextFetchAt] = useState(() => Date.now() + SPOT_POLL_MS);
+  const [nextFetchAt, setNextFetchAt] = useState(
+    () => Date.now() + delayToNextAlignedMark(SPOT_POLL_MS, ALIGN_BUFFER_MS),
+  );
   const [now, setNow] = useState(() => Date.now());
   const rangeRef = useRef(range);
   const pollSpotRef = useRef<(force?: boolean) => Promise<void>>(async () => {});
@@ -129,21 +152,29 @@ export default function PriceChart({ coinId, name, symbol, accent }: PriceChartP
   }, [coinId, range]);
 
   // Keep the series warm in the background so a long-open tab doesn't go stale.
+  // Aligned to wall-clock 5-minute marks (+ buffer) since that's roughly
+  // CoinGecko's own data cadence — no point polling out of step with it.
   useEffect(() => {
-    const id = setInterval(
-      () => loadPriceSeries(coinId, rangeRef.current, rangeRef, setSeries, setStatus),
-      CHART_POLL_MS,
-    );
-    return () => clearInterval(id);
+    let intervalId: ReturnType<typeof setInterval> | undefined;
+    const fire = () => loadPriceSeries(coinId, rangeRef.current, rangeRef, setSeries, setStatus);
+    const timeoutId = setTimeout(() => {
+      fire();
+      intervalId = setInterval(fire, CHART_POLL_MS);
+    }, delayToNextAlignedMark(CHART_POLL_MS, ALIGN_BUFFER_MS));
+    return () => {
+      clearTimeout(timeoutId);
+      clearInterval(intervalId);
+    };
   }, [coinId]);
 
   // Live ticker: poll spot price independently of the chart range, and
-  // nudge the most recent chart point so short ranges feel live.
+  // nudge the most recent chart point so short ranges feel live. Aligned
+  // to wall-clock 5-minute marks (+ buffer), same reasoning as the chart poll.
   useEffect(() => {
     let cancelled = false;
+    let intervalId: ReturnType<typeof setInterval> | undefined;
 
     async function pollSpot(force = false) {
-      setNextFetchAt(Date.now() + SPOT_POLL_MS);
       try {
         const result = await fetchSpotPrice(coinId, force);
         if (cancelled) return;
@@ -168,11 +199,22 @@ export default function PriceChart({ coinId, name, symbol, accent }: PriceChartP
     }
 
     pollSpotRef.current = pollSpot;
-    pollSpot();
-    const id = setInterval(() => pollSpot(), SPOT_POLL_MS);
+    pollSpot(); // cold start: show something immediately
+
+    const alignedDelay = delayToNextAlignedMark(SPOT_POLL_MS, ALIGN_BUFFER_MS);
+    const timeoutId = setTimeout(() => {
+      pollSpot();
+      setNextFetchAt(Date.now() + SPOT_POLL_MS);
+      intervalId = setInterval(() => {
+        pollSpot();
+        setNextFetchAt(Date.now() + SPOT_POLL_MS);
+      }, SPOT_POLL_MS);
+    }, alignedDelay);
+
     return () => {
       cancelled = true;
-      clearInterval(id);
+      clearTimeout(timeoutId);
+      clearInterval(intervalId);
     };
   }, [coinId]);
 
@@ -203,7 +245,9 @@ export default function PriceChart({ coinId, name, symbol, accent }: PriceChartP
           {spot?.lastUpdated && (
             <span className="panel__updated">Updated {formatLastUpdated(spot.lastUpdated)}</span>
           )}
-          <span className="panel__countdown">Next update in {secondsToNextFetch}s</span>
+          <span className="panel__countdown">
+            Next update in {formatCountdown(secondsToNextFetch)}
+          </span>
           <button
             type="button"
             className="panel__refresh"

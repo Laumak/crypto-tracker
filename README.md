@@ -1,5 +1,7 @@
 # Crypto Tracker
 
+https://laumak.github.io/crypto-tracker/
+
 Live BTC and ETH price charts, built with Typescript, React + Vite. Data comes straight
 from the public [CoinGecko API](https://www.coingecko.com/en/api) — no API
 key required.
