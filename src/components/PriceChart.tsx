@@ -24,7 +24,7 @@ import {
   type SpotPrice,
 } from "../api/coingecko.js";
 
-const SPOT_POLL_MS = 20_000; // live ticker refresh
+const SPOT_POLL_MS = 60_000; // live ticker refresh
 const CHART_POLL_MS = 60_000; // background re-sync of the full series
 
 const currencyFormatter = new Intl.NumberFormat("en-US", {
@@ -39,10 +39,18 @@ function formatPrice(value: number | null | undefined): string {
   return currencyFormatter.format(value);
 }
 
+function formatLastUpdated(timestamp: number): string {
+  return new Date(timestamp).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
 function formatAxisTick(timestamp: number, rangeKey: string): string {
   const d = new Date(timestamp);
   if (rangeKey === "1H" || rangeKey === "24H") {
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
   }
   return d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
@@ -53,9 +61,10 @@ async function loadPriceSeries(
   rangeRef: RefObject<string>,
   setSeries: Dispatch<SetStateAction<PricePoint[]>>,
   setStatus: Dispatch<SetStateAction<Status>>,
+  force = false,
 ) {
   try {
-    const points = await fetchMarketChart(coinId, rangeKey);
+    const points = await fetchMarketChart(coinId, rangeKey, force);
     if (rangeRef.current !== rangeKey) return; // stale response, range changed mid-flight
     setSeries(points);
     setStatus("ready");
@@ -73,6 +82,7 @@ function formatTooltipLabel(timestamp: number): string {
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    hour12: false,
   });
 }
 
@@ -90,7 +100,16 @@ export default function PriceChart({ coinId, name, symbol, accent }: PriceChartP
   const [series, setSeries] = useState<PricePoint[]>([]);
   const [spot, setSpot] = useState<SpotPrice | null>(null);
   const [status, setStatus] = useState<Status>("loading");
+  const [nextFetchAt, setNextFetchAt] = useState(() => Date.now() + SPOT_POLL_MS);
+  const [now, setNow] = useState(() => Date.now());
   const rangeRef = useRef(range);
+  const pollSpotRef = useRef<(force?: boolean) => Promise<void>>(async () => {});
+
+  // Tick once a second purely to redraw the "next update in" countdown.
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     rangeRef.current = range;
@@ -123,9 +142,10 @@ export default function PriceChart({ coinId, name, symbol, accent }: PriceChartP
   useEffect(() => {
     let cancelled = false;
 
-    async function pollSpot() {
+    async function pollSpot(force = false) {
+      setNextFetchAt(Date.now() + SPOT_POLL_MS);
       try {
-        const result = await fetchSpotPrice(coinId);
+        const result = await fetchSpotPrice(coinId, force);
         if (cancelled) return;
         setSpot(result);
         setSeries((prev) => {
@@ -147,16 +167,23 @@ export default function PriceChart({ coinId, name, symbol, accent }: PriceChartP
       }
     }
 
+    pollSpotRef.current = pollSpot;
     pollSpot();
-    const id = setInterval(pollSpot, SPOT_POLL_MS);
+    const id = setInterval(() => pollSpot(), SPOT_POLL_MS);
     return () => {
       cancelled = true;
       clearInterval(id);
     };
   }, [coinId]);
 
+  function handleRefresh() {
+    pollSpotRef.current(true);
+    loadPriceSeries(coinId, rangeRef.current, rangeRef, setSeries, setStatus, true);
+  }
+
   const change = spot?.change24h;
   const changeIsUp = typeof change === "number" && change >= 0;
+  const secondsToNextFetch = Math.max(0, Math.round((nextFetchAt - now) / 1000));
 
   return (
     <section className="panel" style={{ "--accent": accent } as CSSProperties}>
@@ -173,6 +200,18 @@ export default function PriceChart({ coinId, name, symbol, accent }: PriceChartP
               {changeIsUp ? "▲" : "▼"} {Math.abs(change).toFixed(2)}% past 24h
             </span>
           )}
+          {spot?.lastUpdated && (
+            <span className="panel__updated">Updated {formatLastUpdated(spot.lastUpdated)}</span>
+          )}
+          <span className="panel__countdown">Next update in {secondsToNextFetch}s</span>
+          <button
+            type="button"
+            className="panel__refresh"
+            onClick={handleRefresh}
+            aria-label={`Refresh ${name} now`}
+          >
+            ↻
+          </button>
         </div>
 
         <div className="panel__ranges" role="tablist" aria-label={`${name} time range`}>

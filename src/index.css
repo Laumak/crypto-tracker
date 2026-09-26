@@ -114,6 +114,29 @@ body {
   color: var(--down);
 }
 
+.panel__updated,
+.panel__countdown {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  color: var(--axis);
+}
+
+.panel__refresh {
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--grid-line);
+  background: transparent;
+  color: var(--axis);
+  cursor: pointer;
+}
+
+.panel__refresh:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 .panel__ranges {
   display: flex;
   gap: 6px;
