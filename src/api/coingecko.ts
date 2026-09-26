@@ -108,7 +108,10 @@ export async function fetchMarketChart(
         throw new Error(`CoinGecko request failed (${res.status})`);
       }
       const data = await res.json();
-      return (data.prices || []).map(([timestamp, price]: [number, number]) => ({ timestamp, price }));
+      return (data.prices || []).map(([timestamp, price]: [number, number]) => ({
+        timestamp,
+        price,
+      }));
     },
     force,
   );
