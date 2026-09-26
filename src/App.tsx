@@ -40,7 +40,8 @@ export default function App() {
   }, []);
 
   const updateTimestamps = Object.values(lastUpdated);
-  const oldestUpdate = updateTimestamps.length === COINS.length ? Math.min(...updateTimestamps) : null;
+  const oldestUpdate =
+    updateTimestamps.length === COINS.length ? Math.min(...updateTimestamps) : null;
   const secondsToNextFetch = Math.max(0, Math.round((nextFetchAt - now) / 1000));
 
   function handleRefreshAll() {
@@ -53,7 +54,9 @@ export default function App() {
     <main className="page">
       <div className="toolbar">
         <div className="toolbar__status">
-          {oldestUpdate && <span className="toolbar__updated">Updated {formatClock(oldestUpdate)}</span>}
+          {oldestUpdate && (
+            <span className="toolbar__updated">Updated {formatClock(oldestUpdate)}</span>
+          )}
           <span className="toolbar__countdown">
             Next update in {formatCountdown(secondsToNextFetch)}
           </span>
