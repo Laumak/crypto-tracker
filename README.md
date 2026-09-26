@@ -1,6 +1,6 @@
 # Crypto Tracker
 
-Live BTC and ETH price charts, built with React + Vite. Data comes straight
+Live BTC and ETH price charts, built with Typescript, React + Vite. Data comes straight
 from the public [CoinGecko API](https://www.coingecko.com/en/api) — no API
 key required.
 
