@@ -194,6 +194,14 @@ body {
   min-height: 0;
 }
 
+.panel__chart .recharts-surface {
+  transition: opacity 160ms ease;
+}
+
+.panel__chart.is-loading .recharts-surface {
+  opacity: 0.35;
+}
+
 .panel__notice {
   position: absolute;
   inset: 0;
@@ -212,8 +220,21 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  opacity: 0;
+  visibility: hidden;
   z-index: 2;
   pointer-events: none;
+  transition: opacity 180ms ease, visibility 0s linear 180ms;
+}
+
+.panel__spinner-overlay.is-visible {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 180ms ease;
+}
+
+.panel__spinner-overlay:not(.is-visible) .panel__spinner {
+  animation-play-state: paused;
 }
 
 .panel__spinner {

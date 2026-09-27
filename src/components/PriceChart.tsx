@@ -38,6 +38,7 @@ const currencyFormatter = new Intl.NumberFormat("en-US", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 });
+const MIN_SPINNER_MS = 2_000;
 
 const axisPriceFormatter = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -66,13 +67,32 @@ async function loadPriceSeries(
   setSeries: Dispatch<SetStateAction<PricePoint[]>>,
   setStatus: Dispatch<SetStateAction<Status>>,
   force = false,
+  minimumLoadingMs = MIN_SPINNER_MS,
 ) {
+  let requestStartedAt: number | null = null;
+  const onRequestStart = () => {
+    requestStartedAt = Date.now();
+    setStatus("loading");
+  };
+  const onCacheHit = () => setStatus("ready");
+  const waitForMinimumLoading = async () => {
+    if (requestStartedAt == null) return;
+    const remaining = minimumLoadingMs - (Date.now() - requestStartedAt);
+    if (remaining > 0) {
+      await new Promise<void>((resolve) => setTimeout(resolve, remaining));
+    }
+  };
+
   try {
-    const points = await fetchMarketChart(coinId, rangeKey, force);
+    const points = await fetchMarketChart(coinId, rangeKey, force, onRequestStart, onCacheHit);
     if (rangeRef.current !== rangeKey) return; // stale response, range changed mid-flight
     setSeries(points);
+    await waitForMinimumLoading();
+    if (rangeRef.current !== rangeKey) return;
     setStatus("ready");
   } catch (err) {
+    if (rangeRef.current !== rangeKey) return;
+    await waitForMinimumLoading();
     if (rangeRef.current !== rangeKey) return;
     console.error(err);
     setStatus("error");
@@ -112,7 +132,7 @@ function PriceChart(
 ) {
   const [series, setSeries] = useState<PricePoint[]>([]);
   const [spot, setSpot] = useState<SpotPrice | null>(null);
-  const [status, setStatus] = useState<Status>("loading");
+  const [status, setStatus] = useState<Status>("ready");
   const rangeRef = useRef(range);
   const pollSpotRef = useRef<(force?: boolean) => Promise<void>>(async () => {});
   const onSpotUpdateRef = useRef(onSpotUpdate);
@@ -124,14 +144,6 @@ function PriceChart(
   useEffect(() => {
     rangeRef.current = range;
   }, [range]);
-
-  // Show the loading state immediately when the range changes, following
-  // React's guidance to adjust state during render rather than in an effect.
-  const [prevRange, setPrevRange] = useState(range);
-  if (range !== prevRange) {
-    setPrevRange(range);
-    setStatus("loading");
-  }
 
   // Reload the whole series whenever the selected range changes.
   useEffect(() => {
@@ -251,17 +263,20 @@ function PriceChart(
         </div>
       </header>
 
-      <div className="panel__chart">
+      <div className={`panel__chart${status === "loading" ? " is-loading" : ""}`}>
         {status === "error" && (
           <div className="panel__notice">
             Couldn't load {name} data. Retrying in the background.
           </div>
         )}
-        {status === "loading" && (
-          <div className="panel__spinner-overlay" role="status" aria-label={`Loading ${name} data`}>
-            <span className="panel__spinner" />
-          </div>
-        )}
+        <div
+          className={`panel__spinner-overlay${status === "loading" ? " is-visible" : ""}`}
+          role={status === "loading" ? "status" : undefined}
+          aria-label={status === "loading" ? `Loading ${name} data` : undefined}
+          aria-hidden={status !== "loading"}
+        >
+          <span className="panel__spinner" />
+        </div>
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={series} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
             <defs>
