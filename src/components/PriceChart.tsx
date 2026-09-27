@@ -213,18 +213,24 @@ function PriceChart(
   }));
 
   const rangeStartPrice = series[0]?.price;
-  const change = status === "ready" && spot && rangeStartPrice
-    ? ((spot.price - rangeStartPrice) / rangeStartPrice) * 100
-    : null;
+  const change =
+    status === "ready" && spot && rangeStartPrice
+      ? ((spot.price - rangeStartPrice) / rangeStartPrice) * 100
+      : null;
   const changeIsUp = typeof change === "number" && change >= 0;
-  const lastVisitPoint = lastVisit == null || series.length === 0
-    ? null
-    : series.reduce((closest, point) =>
-        Math.abs(point.timestamp - lastVisit) < Math.abs(closest.timestamp - lastVisit)
-          ? point
-          : closest,
-      series[0]);
-  const showLastVisit = lastVisitPoint != null && lastVisit! >= series[0].timestamp &&
+  const lastVisitPoint =
+    lastVisit == null || series.length === 0
+      ? null
+      : series.reduce(
+          (closest, point) =>
+            Math.abs(point.timestamp - lastVisit) < Math.abs(closest.timestamp - lastVisit)
+              ? point
+              : closest,
+          series[0],
+        );
+  const showLastVisit =
+    lastVisitPoint != null &&
+    lastVisit! >= series[0].timestamp &&
     lastVisit! <= series[series.length - 1].timestamp;
 
   return (
