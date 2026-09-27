@@ -257,7 +257,7 @@ function PriceChart(
           </div>
         )}
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={series} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
+          <AreaChart data={series} margin={{ top: 8, right: 0, bottom: 0, left: 0 }}>
             <defs>
               <linearGradient id={`fill-${coinId}`} x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="var(--accent)" stopOpacity={0.35} />
@@ -283,7 +283,7 @@ function PriceChart(
               stroke="var(--axis)"
               tick={{ fontSize: 12, fill: "var(--axis)" }}
               tickFormatter={(v) => axisPriceFormatter.format(v)}
-              width={64}
+              width={48}
               axisLine={false}
               tickLine={false}
             />
