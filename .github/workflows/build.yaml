@@ -33,9 +33,10 @@ jobs:
         run: pn install --frozen-lockfile
 
       - name: Lint
-        run: |
-          pn lint
-          pn format:check
+        run: pn lint
+
+      - name: Check formatting
+        run: pn format:check
 
       - name: Build
         run: pn build
