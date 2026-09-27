@@ -17,6 +17,7 @@ import {
   YAxis,
   Tooltip,
   CartesianGrid,
+  ReferenceLine,
 } from "recharts";
 import {
   fetchMarketChart,
@@ -94,11 +95,12 @@ interface PriceChartProps {
   symbol: string;
   accent: string;
   range: string;
+  lastVisit: number | null;
   onSpotUpdate?: (timestamp: number) => void;
 }
 
 function PriceChart(
-  { coinId, name, symbol, accent, range, onSpotUpdate }: PriceChartProps,
+  { coinId, name, symbol, accent, range, lastVisit, onSpotUpdate }: PriceChartProps,
   ref: React.Ref<PriceChartHandle>,
 ) {
   const [series, setSeries] = useState<PricePoint[]>([]);
@@ -205,6 +207,15 @@ function PriceChart(
 
   const change = spot?.change24h;
   const changeIsUp = typeof change === "number" && change >= 0;
+  const lastVisitPoint = lastVisit == null || series.length === 0
+    ? null
+    : series.reduce((closest, point) =>
+        Math.abs(point.timestamp - lastVisit) < Math.abs(closest.timestamp - lastVisit)
+          ? point
+          : closest,
+      series[0]);
+  const showLastVisit = lastVisitPoint != null && lastVisit! >= series[0].timestamp &&
+    lastVisit! <= series[series.length - 1].timestamp;
 
   return (
     <section className="panel" style={{ "--accent": accent } as CSSProperties}>
@@ -245,7 +256,10 @@ function PriceChart(
             </defs>
             <CartesianGrid stroke="var(--grid-line)" vertical={false} />
             <XAxis
+              type="number"
+              scale="time"
               dataKey="timestamp"
+              domain={["dataMin", "dataMax"]}
               tickFormatter={(v) => formatAxisTick(v, range)}
               stroke="var(--axis)"
               tick={{ fontSize: 12, fill: "var(--axis)" }}
@@ -283,6 +297,19 @@ function PriceChart(
               isAnimationActive={false}
               dot={false}
             />
+            {showLastVisit && lastVisitPoint && (
+              <ReferenceLine
+                x={lastVisit ?? undefined}
+                stroke="var(--axis)"
+                strokeDasharray="5 5"
+                label={{
+                  value: `Last visit · ${formatPrice(lastVisitPoint.price)}`,
+                  position: "insideTopRight",
+                  fill: "var(--axis)",
+                  fontSize: 12,
+                }}
+              />
+            )}
           </AreaChart>
         </ResponsiveContainer>
       </div>

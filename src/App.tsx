@@ -9,14 +9,35 @@ const COINS = [
   { coinId: "ethereum", name: "Ethereum", symbol: "ETH", accent: "#8a92f2" },
 ];
 
+const LAST_VISIT_KEY = "crypto-tracker:last-visit";
+
+function readLastVisit(): number | null {
+  try {
+    const timestamp = Number(localStorage.getItem(LAST_VISIT_KEY));
+    return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function App() {
   const [range, setRange] = useState("24H");
+  const [lastVisit] = useState(readLastVisit);
   const [lastUpdated, setLastUpdated] = useState<Record<string, number>>({});
   const [nextFetchAt, setNextFetchAt] = useState(
     () => Date.now() + delayToNextAlignedMark(SPOT_POLL_MS, ALIGN_BUFFER_MS),
   );
   const [now, setNow] = useState(() => Date.now());
   const chartRefs = useRef<Record<string, PriceChartHandle | null>>({});
+
+  // Capture the previous visit first, then save this visit for next time.
+  useEffect(() => {
+    try {
+      localStorage.setItem(LAST_VISIT_KEY, String(Date.now()));
+    } catch {
+      // The marker is a convenience; the page still works when storage is unavailable.
+    }
+  }, []);
 
   // Tick once a second purely to redraw the "next update in" countdown.
   useEffect(() => {
@@ -96,6 +117,7 @@ export default function App() {
           symbol={coin.symbol}
           accent={coin.accent}
           range={range}
+          lastVisit={lastVisit}
           onSpotUpdate={(timestamp) =>
             setLastUpdated((prev) => ({ ...prev, [coin.coinId]: timestamp }))
           }
