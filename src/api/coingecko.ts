@@ -41,11 +41,15 @@ async function withCache<T>(
   maxAgeMs: number,
   fetcher: () => Promise<T>,
   force = false,
+  onRequestStart?: () => void,
+  onCacheHit?: () => void,
 ): Promise<CacheEntry<T>> {
   const cached = readCache<T>(key);
   if (!force && cached && Date.now() - cached.timestamp < maxAgeMs) {
+    onCacheHit?.();
     return cached;
   }
+  onRequestStart?.();
   try {
     const value = await fetcher();
     const entry = { timestamp: Date.now(), value };
@@ -70,7 +74,6 @@ export interface PricePoint {
 
 export interface SpotPrice {
   price: number;
-  change24h: number;
   lastUpdated: number;
 }
 
@@ -96,6 +99,8 @@ export async function fetchMarketChart(
   coinId: string,
   rangeKey: string,
   force = false,
+  onRequestStart?: () => void,
+  onCacheHit?: () => void,
 ): Promise<PricePoint[]> {
   const entry = await withCache(
     `chart:${coinId}:${rangeKey}`,
@@ -116,6 +121,8 @@ export async function fetchMarketChart(
       }));
     },
     force,
+    onRequestStart,
+    onCacheHit,
   );
   return entry.value;
 }
@@ -129,7 +136,7 @@ export async function fetchSpotPrice(coinId: string, force = false): Promise<Spo
     `spot:${coinId}`,
     SPOT_CACHE_MS,
     async () => {
-      const url = `${BASE_URL}/simple/price?ids=${coinId}&vs_currencies=usd&include_24hr_change=true`;
+      const url = `${BASE_URL}/simple/price?ids=${coinId}&vs_currencies=usd`;
       const res = await fetch(url);
       if (!res.ok) {
         throw new Error(`CoinGecko request failed (${res.status})`);
@@ -137,7 +144,7 @@ export async function fetchSpotPrice(coinId: string, force = false): Promise<Spo
       const data = await res.json();
       const coin = data[coinId];
       if (!coin) throw new Error("Unexpected response shape");
-      return { price: coin.usd, change24h: coin.usd_24h_change };
+      return { price: coin.usd };
     },
     force,
   );

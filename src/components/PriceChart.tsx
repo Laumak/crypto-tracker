@@ -17,6 +17,7 @@ import {
   YAxis,
   Tooltip,
   CartesianGrid,
+  ReferenceLine,
 } from "recharts";
 import {
   fetchMarketChart,
@@ -36,6 +37,14 @@ const currencyFormatter = new Intl.NumberFormat("en-US", {
   currency: "USD",
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
+});
+const MIN_SPINNER_MS = 2_000;
+
+const axisPriceFormatter = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  notation: "compact",
+  maximumFractionDigits: 1,
 });
 
 function formatPrice(value: number | null | undefined): string {
@@ -58,13 +67,32 @@ async function loadPriceSeries(
   setSeries: Dispatch<SetStateAction<PricePoint[]>>,
   setStatus: Dispatch<SetStateAction<Status>>,
   force = false,
+  minimumLoadingMs = MIN_SPINNER_MS,
 ) {
+  let requestStartedAt: number | null = null;
+  const onRequestStart = () => {
+    requestStartedAt = Date.now();
+    setStatus("loading");
+  };
+  const onCacheHit = () => setStatus("ready");
+  const waitForMinimumLoading = async () => {
+    if (requestStartedAt == null) return;
+    const remaining = minimumLoadingMs - (Date.now() - requestStartedAt);
+    if (remaining > 0) {
+      await new Promise<void>((resolve) => setTimeout(resolve, remaining));
+    }
+  };
+
   try {
-    const points = await fetchMarketChart(coinId, rangeKey, force);
+    const points = await fetchMarketChart(coinId, rangeKey, force, onRequestStart, onCacheHit);
     if (rangeRef.current !== rangeKey) return; // stale response, range changed mid-flight
     setSeries(points);
+    await waitForMinimumLoading();
+    if (rangeRef.current !== rangeKey) return;
     setStatus("ready");
   } catch (err) {
+    if (rangeRef.current !== rangeKey) return;
+    await waitForMinimumLoading();
     if (rangeRef.current !== rangeKey) return;
     console.error(err);
     setStatus("error");
@@ -94,16 +122,17 @@ interface PriceChartProps {
   symbol: string;
   accent: string;
   range: string;
+  lastVisit: number | null;
   onSpotUpdate?: (timestamp: number) => void;
 }
 
 function PriceChart(
-  { coinId, name, symbol, accent, range, onSpotUpdate }: PriceChartProps,
+  { coinId, name, symbol, accent, range, lastVisit, onSpotUpdate }: PriceChartProps,
   ref: React.Ref<PriceChartHandle>,
 ) {
   const [series, setSeries] = useState<PricePoint[]>([]);
   const [spot, setSpot] = useState<SpotPrice | null>(null);
-  const [status, setStatus] = useState<Status>("loading");
+  const [status, setStatus] = useState<Status>("ready");
   const rangeRef = useRef(range);
   const pollSpotRef = useRef<(force?: boolean) => Promise<void>>(async () => {});
   const onSpotUpdateRef = useRef(onSpotUpdate);
@@ -115,14 +144,6 @@ function PriceChart(
   useEffect(() => {
     rangeRef.current = range;
   }, [range]);
-
-  // Show the loading state immediately when the range changes, following
-  // React's guidance to adjust state during render rather than in an effect.
-  const [prevRange, setPrevRange] = useState(range);
-  if (range !== prevRange) {
-    setPrevRange(range);
-    setStatus("loading");
-  }
 
   // Reload the whole series whenever the selected range changes.
   useEffect(() => {
@@ -203,8 +224,26 @@ function PriceChart(
     },
   }));
 
-  const change = spot?.change24h;
+  const rangeStartPrice = series[0]?.price;
+  const change =
+    status === "ready" && spot && rangeStartPrice
+      ? ((spot.price - rangeStartPrice) / rangeStartPrice) * 100
+      : null;
   const changeIsUp = typeof change === "number" && change >= 0;
+  const lastVisitPoint =
+    lastVisit == null || series.length === 0
+      ? null
+      : series.reduce(
+          (closest, point) =>
+            Math.abs(point.timestamp - lastVisit) < Math.abs(closest.timestamp - lastVisit)
+              ? point
+              : closest,
+          series[0],
+        );
+  const showLastVisit =
+    lastVisitPoint != null &&
+    lastVisit! >= series[0].timestamp &&
+    lastVisit! <= series[series.length - 1].timestamp;
 
   return (
     <section className="panel" style={{ "--accent": accent } as CSSProperties}>
@@ -216,27 +255,30 @@ function PriceChart(
 
         <div className="panel__ticker">
           <span className="panel__price">{formatPrice(spot?.price)}</span>
-          {typeof change === "number" && (
+          {change != null && (
             <span className={`panel__change ${changeIsUp ? "is-up" : "is-down"}`}>
-              {changeIsUp ? "▲" : "▼"} {Math.abs(change).toFixed(2)}% past 24h
+              {changeIsUp ? "▲" : "▼"} {Math.abs(change).toFixed(2)}% past {range.toLowerCase()}
             </span>
           )}
         </div>
       </header>
 
-      <div className="panel__chart">
+      <div className={`panel__chart${status === "loading" ? " is-loading" : ""}`}>
         {status === "error" && (
           <div className="panel__notice">
             Couldn't load {name} data. Retrying in the background.
           </div>
         )}
-        {status === "loading" && (
-          <div className="panel__spinner-overlay" role="status" aria-label={`Loading ${name} data`}>
-            <span className="panel__spinner" />
-          </div>
-        )}
+        <div
+          className={`panel__spinner-overlay${status === "loading" ? " is-visible" : ""}`}
+          role={status === "loading" ? "status" : undefined}
+          aria-label={status === "loading" ? `Loading ${name} data` : undefined}
+          aria-hidden={status !== "loading"}
+        >
+          <span className="panel__spinner" />
+        </div>
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={series} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
+          <AreaChart data={series} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
             <defs>
               <linearGradient id={`fill-${coinId}`} x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="var(--accent)" stopOpacity={0.35} />
@@ -245,7 +287,10 @@ function PriceChart(
             </defs>
             <CartesianGrid stroke="var(--grid-line)" vertical={false} />
             <XAxis
+              type="number"
+              scale="time"
               dataKey="timestamp"
+              domain={["dataMin", "dataMax"]}
               tickFormatter={(v) => formatAxisTick(v, range)}
               stroke="var(--axis)"
               tick={{ fontSize: 12, fill: "var(--axis)" }}
@@ -258,8 +303,8 @@ function PriceChart(
               orientation="right"
               stroke="var(--axis)"
               tick={{ fontSize: 12, fill: "var(--axis)" }}
-              tickFormatter={(v) => formatPrice(v)}
-              width={90}
+              tickFormatter={(v) => axisPriceFormatter.format(v)}
+              width={48}
               axisLine={false}
               tickLine={false}
             />
@@ -283,6 +328,19 @@ function PriceChart(
               isAnimationActive={false}
               dot={false}
             />
+            {showLastVisit && lastVisitPoint && (
+              <ReferenceLine
+                x={lastVisit ?? undefined}
+                stroke="var(--axis)"
+                strokeDasharray="5 5"
+                label={{
+                  value: `Last visit · ${formatPrice(lastVisitPoint.price)}`,
+                  position: "insideTopRight",
+                  fill: "var(--axis)",
+                  fontSize: 12,
+                }}
+              />
+            )}
           </AreaChart>
         </ResponsiveContainer>
       </div>
