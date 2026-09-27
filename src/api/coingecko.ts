@@ -70,7 +70,6 @@ export interface PricePoint {
 
 export interface SpotPrice {
   price: number;
-  change24h: number;
   lastUpdated: number;
 }
 
@@ -129,7 +128,7 @@ export async function fetchSpotPrice(coinId: string, force = false): Promise<Spo
     `spot:${coinId}`,
     SPOT_CACHE_MS,
     async () => {
-      const url = `${BASE_URL}/simple/price?ids=${coinId}&vs_currencies=usd&include_24hr_change=true`;
+      const url = `${BASE_URL}/simple/price?ids=${coinId}&vs_currencies=usd`;
       const res = await fetch(url);
       if (!res.ok) {
         throw new Error(`CoinGecko request failed (${res.status})`);
@@ -137,7 +136,7 @@ export async function fetchSpotPrice(coinId: string, force = false): Promise<Spo
       const data = await res.json();
       const coin = data[coinId];
       if (!coin) throw new Error("Unexpected response shape");
-      return { price: coin.usd, change24h: coin.usd_24h_change };
+      return { price: coin.usd };
     },
     force,
   );

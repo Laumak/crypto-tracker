@@ -212,7 +212,10 @@ function PriceChart(
     },
   }));
 
-  const change = spot?.change24h;
+  const rangeStartPrice = series[0]?.price;
+  const change = status === "ready" && spot && rangeStartPrice
+    ? ((spot.price - rangeStartPrice) / rangeStartPrice) * 100
+    : null;
   const changeIsUp = typeof change === "number" && change >= 0;
   const lastVisitPoint = lastVisit == null || series.length === 0
     ? null
@@ -234,9 +237,9 @@ function PriceChart(
 
         <div className="panel__ticker">
           <span className="panel__price">{formatPrice(spot?.price)}</span>
-          {typeof change === "number" && (
+          {change != null && (
             <span className={`panel__change ${changeIsUp ? "is-up" : "is-down"}`}>
-              {changeIsUp ? "▲" : "▼"} {Math.abs(change).toFixed(2)}% past 24h
+              {changeIsUp ? "▲" : "▼"} {Math.abs(change).toFixed(2)}% past {range.toLowerCase()}
             </span>
           )}
         </div>
