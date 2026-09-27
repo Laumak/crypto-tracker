@@ -39,6 +39,13 @@ const currencyFormatter = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 2,
 });
 
+const axisPriceFormatter = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
+
 function formatPrice(value: number | null | undefined): string {
   if (value == null || Number.isNaN(value)) return "—";
   return currencyFormatter.format(value);
@@ -272,8 +279,8 @@ function PriceChart(
               orientation="right"
               stroke="var(--axis)"
               tick={{ fontSize: 12, fill: "var(--axis)" }}
-              tickFormatter={(v) => formatPrice(v)}
-              width={90}
+              tickFormatter={(v) => axisPriceFormatter.format(v)}
+              width={64}
               axisLine={false}
               tickLine={false}
             />
