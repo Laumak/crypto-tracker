@@ -73,6 +73,24 @@ export default function App() {
 
   return (
     <main className="page">
+      {COINS.map((coin) => (
+        <PriceChart
+          key={coin.coinId}
+          ref={(handle) => {
+            chartRefs.current[coin.coinId] = handle;
+          }}
+          coinId={coin.coinId}
+          name={coin.name}
+          symbol={coin.symbol}
+          accent={coin.accent}
+          range={range}
+          lastVisit={lastVisit}
+          onSpotUpdate={(timestamp) =>
+            setLastUpdated((prev) => ({ ...prev, [coin.coinId]: timestamp }))
+          }
+        />
+      ))}
+
       <div className="toolbar">
         <div className="toolbar__status">
           {oldestUpdate && (
@@ -105,24 +123,6 @@ export default function App() {
           ))}
         </div>
       </div>
-
-      {COINS.map((coin) => (
-        <PriceChart
-          key={coin.coinId}
-          ref={(handle) => {
-            chartRefs.current[coin.coinId] = handle;
-          }}
-          coinId={coin.coinId}
-          name={coin.name}
-          symbol={coin.symbol}
-          accent={coin.accent}
-          range={range}
-          lastVisit={lastVisit}
-          onSpotUpdate={(timestamp) =>
-            setLastUpdated((prev) => ({ ...prev, [coin.coinId]: timestamp }))
-          }
-        />
-      ))}
     </main>
   );
 }
